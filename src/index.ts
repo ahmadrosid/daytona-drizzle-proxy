@@ -4,7 +4,7 @@ import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 
-const VERSION = '1.1.5';
+const VERSION = '1.1.6';
 
 function showHelp() {
   console.log(`
@@ -96,35 +96,35 @@ function addCorsHeaders(res: http.ServerResponse, origin?: string) {
 }
 
 async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, targetUrl: string) {
-  try {
-    const url = new URL(req.url || '/', targetUrl);
-    
-    // Get request body
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) {
-      chunks.push(chunk);
-    }
-    const body = Buffer.concat(chunks);
+  const url = new URL(req.url || '/', targetUrl);
+  
+  // Get request body
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+  const body = Buffer.concat(chunks);
 
-    // Prepare headers
-    const headers: Record<string, string | string[]> = {};
-    for (const [key, value] of Object.entries(req.headers)) {
-      if (key !== 'host' && key !== 'origin' && value) {
-        headers[key] = value;
-      }
+  // Prepare headers
+  const headers: Record<string, string | string[]> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (key !== 'host' && key !== 'origin' && value) {
+      headers[key] = value;
     }
-    
-    // Use the appropriate module based on protocol
-    const client = url.protocol === 'https:' ? https : http;
-    
-    const options = {
-      hostname: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? 443 : 80),
-      path: url.pathname + url.search,
-      method: req.method || 'GET',
-      headers: headers
-    };
+  }
+  
+  // Use the appropriate module based on protocol
+  const client = url.protocol === 'https:' ? https : http;
+  
+  const options = {
+    hostname: url.hostname,
+    port: url.port || (url.protocol === 'https:' ? 443 : 80),
+    path: url.pathname + url.search,
+    method: req.method || 'GET',
+    headers: headers
+  };
 
+  return new Promise<void>((resolve) => {
     // Make the proxy request
     const proxyReq = client.request(options, (proxyRes) => {
       // Add CORS headers
@@ -142,11 +142,46 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
       
       // Pipe the response
       proxyRes.pipe(res);
+      
+      proxyRes.on('end', () => {
+        resolve();
+      });
     });
 
     // Handle errors
     proxyReq.on('error', (error) => {
-      throw error;
+      const errorDetails = error instanceof Error 
+        ? { 
+            message: error.message, 
+            code: (error as any).code,
+            cause: (error as any).cause
+          }
+        : { message: 'Unknown error' };
+      
+      console.error('❌ Proxy error:', {
+        url: req.url,
+        method: req.method,
+        target: targetUrl,
+        error: errorDetails
+      });
+      
+      // Make sure we haven't already sent headers
+      if (!res.headersSent) {
+        addCorsHeaders(res, req.headers.origin);
+        res.writeHead(502, 'Bad Gateway', { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          error: 'Proxy request failed',
+          message: errorDetails.message,
+          details: {
+            target: targetUrl,
+            method: req.method,
+            path: req.url,
+            code: errorDetails.code
+          }
+        }));
+      }
+      
+      resolve();
     });
 
     // Write request body if present
@@ -155,37 +190,7 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
     }
     
     proxyReq.end();
-
-  } catch (error) {
-    const errorDetails = error instanceof Error 
-      ? { 
-          message: error.message, 
-          code: (error as any).code,
-          cause: (error as any).cause,
-          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        }
-      : { message: 'Unknown error' };
-    
-    console.error('❌ Proxy error:', {
-      url: req.url,
-      method: req.method,
-      target: targetUrl,
-      error: errorDetails
-    });
-    
-    addCorsHeaders(res, req.headers.origin);
-    res.writeHead(502, 'Bad Gateway', { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ 
-      error: 'Proxy request failed',
-      message: errorDetails.message,
-      details: {
-        target: targetUrl,
-        method: req.method,
-        path: req.url,
-        code: errorDetails.code
-      }
-    }));
-  }
+  });
 }
 
 function startProxy(config: Config) {
