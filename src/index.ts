@@ -4,88 +4,13 @@ import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 import net from 'net';
+import { Command } from 'commander';
 
-const VERSION = '1.1.8';
-
-function showHelp() {
-  console.log(`
-Daytona Drizzle Proxy v${VERSION}
-
-Simple CORS proxy for Drizzle Studio in Daytona environments.
-
-USAGE:
-  daytona-drizzle-proxy [OPTIONS]
-
-OPTIONS:
-  -p, --port <number>     Proxy server port (default: 8080)
-  -t, --target <url>      Target Drizzle Studio URL (default: http://localhost:4983)
-  -h, --help             Show this help
-  --version              Show version
-
-EXAMPLES:
-  daytona-drizzle-proxy
-    Start proxy on port 8080, forwarding to localhost:4983
-
-  daytona-drizzle-proxy --port 9000 --target http://localhost:4983
-    Start proxy on port 9000, forwarding to localhost:4983
-
-USAGE:
-  1. Start Drizzle Studio: drizzle-kit studio
-  2. Start this proxy: daytona-drizzle-proxy  
-  3. Use proxy URL: http://localhost:8080
-`);
-}
+const VERSION = '1.2.0';
 
 interface Config {
   port: number;
   target: string;
-}
-
-function parseArgs(args: string[]): Config {
-  const config: Config = {
-    port: 8080,
-    target: 'http://localhost:4983'
-  };
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    
-    switch (arg) {
-      case '-h':
-      case '--help':
-        showHelp();
-        process.exit(0);
-        break;
-      case '--version':
-        console.log(`daytona-drizzle-proxy v${VERSION}`);
-        process.exit(0);
-        break;
-      case '-p':
-      case '--port':
-        const port = parseInt(args[++i]);
-        if (isNaN(port) || port <= 0 || port > 65535) {
-          console.error(`❌ Invalid port: ${args[i]}`);
-          process.exit(1);
-        }
-        config.port = port;
-        break;
-      case '-t':
-      case '--target':
-        config.target = args[++i];
-        if (!config.target) {
-          console.error('❌ Target URL required');
-          process.exit(1);
-        }
-        break;
-      default:
-        if (arg.startsWith('-')) {
-          console.error(`❌ Unknown option: ${arg}`);
-          process.exit(1);
-        }
-    }
-  }
-  
-  return config;
 }
 
 function addCorsHeaders(res: http.ServerResponse, origin?: string) {
@@ -254,9 +179,42 @@ function startProxy(config: Config) {
 
 // Main execution
 async function main() {
+  const program = new Command();
+  
+  program
+    .name('daytona-drizzle-proxy')
+    .description('Simple CORS proxy for Drizzle Studio in Daytona environments')
+    .version(VERSION, '-v, --version', 'Show version')
+    .option('-p, --port <number>', 'Proxy server port', '8080')
+    .option('-t, --target <url>', 'Target Drizzle Studio URL', 'http://localhost:4983')
+    .addHelpText('after', `
+EXAMPLES:
+  daytona-drizzle-proxy
+    Start proxy on port 8080, forwarding to localhost:4983
+
+  daytona-drizzle-proxy --port 9000 --target http://localhost:4983
+    Start proxy on port 9000, forwarding to localhost:4983
+
+USAGE:
+  1. Start Drizzle Studio: drizzle-kit studio
+  2. Start this proxy: daytona-drizzle-proxy  
+  3. Use proxy URL: http://localhost:8080`)
+    .parse(process.argv);
+
+  const options = program.opts();
+  
+  const port = parseInt(options.port);
+  if (isNaN(port) || port <= 0 || port > 65535) {
+    console.error(`❌ Invalid port: ${options.port}`);
+    process.exit(1);
+  }
+  
+  const config: Config = {
+    port,
+    target: options.target
+  };
+  
   try {
-    const config = parseArgs(process.argv.slice(2));
-    
     // Quick connectivity check
     console.log(`🔍 Testing connection to ${config.target}...`);
     try {
