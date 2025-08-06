@@ -6,7 +6,7 @@ import { URL } from 'url';
 import net from 'net';
 import { Command } from 'commander';
 
-const VERSION = '1.2.0';
+const VERSION = '1.2.2';
 
 interface Config {
   port: number;
@@ -37,9 +37,12 @@ async function makeProxyRequest(
       path: url.pathname + url.search,
       method: method || 'GET',
       headers: headers,
-      // Simple SSL options - just ignore cert validation
+      // Enhanced SSL options for better compatibility
       ...(useHttps ? { 
-        rejectUnauthorized: false
+        rejectUnauthorized: false,
+        secureProtocol: 'TLS_method',
+        ciphers: 'DEFAULT',
+        secureOptions: 0
       } : {})
     };
 
@@ -84,9 +87,19 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
   
   // If we get EPROTO error, it might be wrong protocol - try the opposite
   if (result.error && (result.error as any).code === 'EPROTO') {
-    console.log(`⚠️  Protocol mismatch detected, retrying with ${useHttps ? 'HTTP' : 'HTTPS'}...`);
+    console.log(`⚠️  SSL/Protocol error detected. Error details:`, result.error.message);
+    console.log(`   Attempting fallback to ${useHttps ? 'HTTP' : 'HTTPS'}...`);
     useHttps = !useHttps;
     result = await makeProxyRequest(url, req.method || 'GET', headers, body, useHttps);
+    
+    // If still failing with HTTPS, provide more diagnostic info
+    if (result.error && useHttps) {
+      console.log(`❌ SSL connection failed. Common causes:`);
+      console.log(`   - Server is using HTTP, not HTTPS`);
+      console.log(`   - Self-signed certificate issues`);
+      console.log(`   - TLS version mismatch`);
+      console.log(`   Error: ${result.error.message}`);
+    }
   }
   
   if (result.error) {
@@ -130,7 +143,10 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
   
   // Copy response headers (except CORS ones)
   Object.entries(proxyRes.headers).forEach(([key, value]) => {
-    if (!key.toLowerCase().startsWith('access-control-') && value) {
+    const lowerKey = key.toLowerCase();
+    if (!lowerKey.startsWith('access-control-') && 
+        !lowerKey.includes('cors') && 
+        value) {
       res.setHeader(key, value);
     }
   });
@@ -228,7 +244,12 @@ USAGE:
           path: '/',
           method: 'GET',  // Changed from HEAD to GET as some servers don't support HEAD
           timeout: 3000,
-          ...(testUrl.protocol === 'https:' ? { rejectUnauthorized: false } : {})
+          ...(testUrl.protocol === 'https:' ? { 
+            rejectUnauthorized: false,
+            secureProtocol: 'TLS_method',
+            ciphers: 'DEFAULT',
+            secureOptions: 0
+          } : {})
         };
         
         const req = client.request(options, (res) => {
