@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import http from 'http';
+import https from 'https';
+import { URL } from 'url';
 
-const VERSION = '1.1.4';
+const VERSION = '1.1.5';
 
 function showHelp() {
   console.log(`
@@ -96,8 +98,7 @@ function addCorsHeaders(res: http.ServerResponse, origin?: string) {
 async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, targetUrl: string) {
   try {
     const url = new URL(req.url || '/', targetUrl);
-    const fullTargetUrl = url.toString();
-
+    
     // Get request body
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
@@ -105,47 +106,55 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
     }
     const body = Buffer.concat(chunks);
 
-    // Make request to target
-    const headers: Record<string, string> = {};
+    // Prepare headers
+    const headers: Record<string, string | string[]> = {};
     for (const [key, value] of Object.entries(req.headers)) {
       if (key !== 'host' && key !== 'origin' && value) {
-        headers[key] = Array.isArray(value) ? value[0] : value;
+        headers[key] = value;
       }
     }
-
-    const response = await fetch(fullTargetUrl, {
-      method: req.method,
-      headers,
-      body: req.method !== 'GET' && req.method !== 'HEAD' && body.length > 0 ? body : undefined,
-    });
-
-    // Add CORS headers
-    addCorsHeaders(res, req.headers.origin);
-
-    // Copy response headers (except CORS ones)
-    response.headers.forEach((value: string, key: string) => {
-      if (!key.toLowerCase().startsWith('access-control-')) {
-        res.setHeader(key, value);
-      }
-    });
-
-    // Send response
-    res.writeHead(response.status, response.statusText);
     
-    if (response.body) {
-      const reader = response.body.getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(Buffer.from(value));
+    // Use the appropriate module based on protocol
+    const client = url.protocol === 'https:' ? https : http;
+    
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
+      method: req.method || 'GET',
+      headers: headers
+    };
+
+    // Make the proxy request
+    const proxyReq = client.request(options, (proxyRes) => {
+      // Add CORS headers
+      addCorsHeaders(res, req.headers.origin);
+      
+      // Copy response headers (except CORS ones)
+      Object.entries(proxyRes.headers).forEach(([key, value]) => {
+        if (!key.toLowerCase().startsWith('access-control-') && value) {
+          res.setHeader(key, value);
         }
-      } finally {
-        reader.releaseLock();
-      }
+      });
+      
+      // Set status code
+      res.writeHead(proxyRes.statusCode || 200, proxyRes.statusMessage);
+      
+      // Pipe the response
+      proxyRes.pipe(res);
+    });
+
+    // Handle errors
+    proxyReq.on('error', (error) => {
+      throw error;
+    });
+
+    // Write request body if present
+    if (body.length > 0 && req.method !== 'GET' && req.method !== 'HEAD') {
+      proxyReq.write(body);
     }
     
-    res.end();
+    proxyReq.end();
 
   } catch (error) {
     const errorDetails = error instanceof Error 
@@ -222,7 +231,29 @@ async function main() {
     // Quick connectivity check
     console.log(`🔍 Testing connection to ${config.target}...`);
     try {
-      await fetch(config.target, { method: 'HEAD', signal: AbortSignal.timeout(3000) });
+      const testUrl = new URL(config.target);
+      const client = testUrl.protocol === 'https:' ? https : http;
+      
+      await new Promise<void>((resolve, reject) => {
+        const req = client.request({
+          hostname: testUrl.hostname,
+          port: testUrl.port || (testUrl.protocol === 'https:' ? 443 : 80),
+          path: '/',
+          method: 'HEAD',
+          timeout: 3000
+        }, (res) => {
+          res.resume();
+          resolve();
+        });
+        
+        req.on('error', reject);
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error('timeout'));
+        });
+        req.end();
+      });
+      
       console.log('✅ Target is reachable');
     } catch {
       console.log('⚠️  Target not reachable - continuing anyway');
