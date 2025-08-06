@@ -4,7 +4,7 @@ import http from 'http';
 import https from 'https';
 import { URL } from 'url';
 
-const VERSION = '1.1.6';
+const VERSION = '1.1.7';
 
 function showHelp() {
   console.log(`
@@ -116,12 +116,14 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
   // Use the appropriate module based on protocol
   const client = url.protocol === 'https:' ? https : http;
   
-  const options = {
+  const options: http.RequestOptions | https.RequestOptions = {
     hostname: url.hostname,
     port: url.port || (url.protocol === 'https:' ? 443 : 80),
     path: url.pathname + url.search,
     method: req.method || 'GET',
-    headers: headers
+    headers: headers,
+    // Allow self-signed certificates for HTTPS
+    ...(url.protocol === 'https:' ? { rejectUnauthorized: false } : {})
   };
 
   return new Promise<void>((resolve) => {
@@ -240,13 +242,16 @@ async function main() {
       const client = testUrl.protocol === 'https:' ? https : http;
       
       await new Promise<void>((resolve, reject) => {
-        const req = client.request({
+        const options: http.RequestOptions | https.RequestOptions = {
           hostname: testUrl.hostname,
           port: testUrl.port || (testUrl.protocol === 'https:' ? 443 : 80),
           path: '/',
           method: 'HEAD',
-          timeout: 3000
-        }, (res) => {
+          timeout: 3000,
+          ...(testUrl.protocol === 'https:' ? { rejectUnauthorized: false } : {})
+        };
+        
+        const req = client.request(options, (res) => {
           res.resume();
           resolve();
         });
