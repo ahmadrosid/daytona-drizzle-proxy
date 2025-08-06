@@ -29,7 +29,7 @@ bun install -g daytona-drizzle-proxy
 ## Options
 
 - `-p, --port <number>`: Proxy port (default: 8080)
-- `-t, --target <url>`: Target URL (default: http://localhost:1434)
+- `-t, --target <url>`: Target URL (default: http://localhost:4983)
 - `-h, --help`: Show help
 
 ## License

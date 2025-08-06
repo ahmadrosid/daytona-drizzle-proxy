@@ -2,7 +2,7 @@
 
 import http from 'http';
 
-const VERSION = '1.1.3';
+const VERSION = '1.1.4';
 
 function showHelp() {
   console.log(`
@@ -15,13 +15,13 @@ USAGE:
 
 OPTIONS:
   -p, --port <number>     Proxy server port (default: 8080)
-  -t, --target <url>      Target Drizzle Studio URL (default: http://localhost:1434)
+  -t, --target <url>      Target Drizzle Studio URL (default: http://localhost:4983)
   -h, --help             Show this help
   --version              Show version
 
 EXAMPLES:
   daytona-drizzle-proxy
-    Start proxy on port 8080, forwarding to localhost:1434
+    Start proxy on port 8080, forwarding to localhost:4983
 
   daytona-drizzle-proxy --port 9000 --target http://localhost:4983
     Start proxy on port 9000, forwarding to localhost:4983
@@ -41,7 +41,7 @@ interface Config {
 function parseArgs(args: string[]): Config {
   const config: Config = {
     port: 8080,
-    target: 'http://localhost:1434'
+    target: 'http://localhost:4983'
   };
 
   for (let i = 0; i < args.length; i++) {
