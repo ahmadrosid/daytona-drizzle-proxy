@@ -6,7 +6,7 @@ import { URL } from 'url';
 import net from 'net';
 import { Command } from 'commander';
 
-const VERSION = '1.2.5';
+const VERSION = '1.2.8';
 
 interface Config {
   port: number;
@@ -188,6 +188,24 @@ function startProxy(config: Config) {
       return;
     }
 
+    // Handle /studio and /cdn-cgi routes - proxy to drizzle studio CDN
+    if (req.url?.startsWith('/studio') || req.url?.startsWith('/cdn-cgi')) {
+      const originalUrl = req.url;
+      
+      if (req.url.startsWith('/studio')) {
+        // Strip /studio prefix and proxy to drizzle CDN
+        const studioPath = req.url.replace(/^\/studio/, '') || '/';
+        req.url = studioPath;
+        console.log(`🎨 Studio route: ${originalUrl} → https://local.drizzle.studio${studioPath}`);
+      } else {
+        // Keep /cdn-cgi path as-is
+        console.log(`☁️ CDN route: ${originalUrl} → https://local.drizzle.studio${originalUrl}`);
+      }
+      
+      await proxyRequest(req, res, 'https://local.drizzle.studio');
+      return;
+    }
+
     await proxyRequest(req, res, config.target);
   });
 
@@ -230,7 +248,13 @@ EXAMPLES:
 USAGE:
   1. Start Drizzle Studio: drizzle-kit studio
   2. Start this proxy: daytona-drizzle-proxy  
-  3. Use proxy URL: http://localhost:8080`)
+  3. Use proxy URL: http://localhost:8080
+  4. Or access studio directly: http://localhost:8080/studio
+
+ROUTES:
+  /studio/**  - Proxies to Drizzle Studio CDN (https://local.drizzle.studio)
+  /cdn-cgi/** - Proxies to Drizzle Studio CDN (https://local.drizzle.studio)
+  /**         - Proxies to your configured target (default: localhost:4983)`)
     .parse(process.argv);
 
   const options = program.opts();
