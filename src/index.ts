@@ -2,7 +2,7 @@
 
 import http from 'http';
 
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 
 function showHelp() {
   console.log(`
@@ -124,7 +124,7 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
 
     // Copy response headers (except CORS ones)
     response.headers.forEach((value: string, key: string) => {
-      if (!key.startsWith('access-control-')) {
+      if (!key.toLowerCase().startsWith('access-control-')) {
         res.setHeader(key, value);
       }
     });
