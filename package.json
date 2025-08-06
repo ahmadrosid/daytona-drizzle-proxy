@@ -1,0 +1,37 @@
+{
+  "name": "daytona-drizzle-proxy",
+  "version": "1.1.1",
+  "description": "A proxy server CLI to fix CORS issues when accessing Drizzle Studio from Daytona preview URLs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "daytona-drizzle-proxy": "dist/index.js"
+  },
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node --format cjs --sourcemap",
+    "dev": "bun run src/index.ts",
+    "prepublishOnly": "bun run build"
+  },
+  "keywords": [
+    "daytona",
+    "drizzle",
+    "proxy",
+    "cors",
+    "cli",
+    "database",
+    "studio"
+  ],
+  "author": "Ahmad Rosid",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Orchids/daytona-drizzle-proxy.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.0"
+  }
+}
