@@ -2,7 +2,7 @@
 
 import http from 'http';
 
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 
 function showHelp() {
   console.log(`
@@ -148,13 +148,33 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
     res.end();
 
   } catch (error) {
-    console.error('❌ Proxy error:', error instanceof Error ? error.message : 'Unknown error');
+    const errorDetails = error instanceof Error 
+      ? { 
+          message: error.message, 
+          code: (error as any).code,
+          cause: (error as any).cause,
+          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        }
+      : { message: 'Unknown error' };
+    
+    console.error('❌ Proxy error:', {
+      url: req.url,
+      method: req.method,
+      target: targetUrl,
+      error: errorDetails
+    });
     
     addCorsHeaders(res, req.headers.origin);
     res.writeHead(502, 'Bad Gateway', { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ 
       error: 'Proxy request failed',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: errorDetails.message,
+      details: {
+        target: targetUrl,
+        method: req.method,
+        path: req.url,
+        code: errorDetails.code
+      }
     }));
   }
 }
