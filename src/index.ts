@@ -6,7 +6,7 @@ import { URL } from 'url';
 import net from 'net';
 import { Command } from 'commander';
 
-const VERSION = '1.2.4';
+const VERSION = '1.2.5';
 
 interface Config {
   port: number;
@@ -157,15 +157,15 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
     });
   });
   
-  // Add our CORS headers
-  addCorsHeaders(res, req.headers.origin);
-  
-  // Copy remaining response headers
+  // Copy remaining response headers (CORS ones already removed)
   Object.entries(proxyRes.headers).forEach(([key, value]) => {
     if (value) {
       res.setHeader(key, value);
     }
   });
+  
+  // Now add our CORS headers last so they overwrite anything
+  addCorsHeaders(res, req.headers.origin);
   
   // Set status code
   res.writeHead(proxyRes.statusCode || 200, proxyRes.statusMessage);
