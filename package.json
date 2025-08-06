@@ -1,6 +1,6 @@
 {
   "name": "daytona-drizzle-proxy",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "A proxy server CLI to fix CORS issues when accessing Drizzle Studio from Daytona preview URLs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

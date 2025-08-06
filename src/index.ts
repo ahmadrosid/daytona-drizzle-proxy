@@ -6,7 +6,7 @@ import { URL } from 'url';
 import net from 'net';
 import { Command } from 'commander';
 
-const VERSION = '1.2.3';
+const VERSION = '1.2.4';
 
 interface Config {
   port: number;
@@ -149,7 +149,12 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
   ];
   
   corsHeadersToRemove.forEach(header => {
-    delete proxyRes.headers[header];
+    // Remove both lowercase and any case variations
+    Object.keys(proxyRes.headers).forEach(key => {
+      if (key.toLowerCase() === header) {
+        delete proxyRes.headers[key];
+      }
+    });
   });
   
   // Add our CORS headers
