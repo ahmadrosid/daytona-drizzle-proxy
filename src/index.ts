@@ -6,7 +6,7 @@ import { URL } from 'url';
 import net from 'net';
 import { Command } from 'commander';
 
-const VERSION = '1.2.2';
+const VERSION = '1.2.3';
 
 interface Config {
   port: number;
@@ -138,15 +138,26 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
   // Success - forward the response
   const proxyRes = result.res;
   
-  // Add CORS headers
+  // First, explicitly remove any CORS headers from the proxy response
+  const corsHeadersToRemove = [
+    'access-control-allow-origin',
+    'access-control-allow-methods', 
+    'access-control-allow-headers',
+    'access-control-allow-credentials',
+    'access-control-expose-headers',
+    'access-control-max-age'
+  ];
+  
+  corsHeadersToRemove.forEach(header => {
+    delete proxyRes.headers[header];
+  });
+  
+  // Add our CORS headers
   addCorsHeaders(res, req.headers.origin);
   
-  // Copy response headers (except CORS ones)
+  // Copy remaining response headers
   Object.entries(proxyRes.headers).forEach(([key, value]) => {
-    const lowerKey = key.toLowerCase();
-    if (!lowerKey.startsWith('access-control-') && 
-        !lowerKey.includes('cors') && 
-        value) {
+    if (value) {
       res.setHeader(key, value);
     }
   });
