@@ -3,8 +3,9 @@
 import http from 'http';
 import https from 'https';
 import { URL } from 'url';
+import net from 'net';
 
-const VERSION = '1.1.7';
+const VERSION = '1.1.8';
 
 function showHelp() {
   console.log(`
@@ -95,6 +96,45 @@ function addCorsHeaders(res: http.ServerResponse, origin?: string) {
   res.setHeader('X-Daytona-Disable-CORS', 'true');
 }
 
+async function makeProxyRequest(
+  url: URL,
+  method: string,
+  headers: Record<string, string | string[]>,
+  body: Buffer,
+  useHttps: boolean
+): Promise<{ res: http.IncomingMessage, error?: any }> {
+  return new Promise((resolve) => {
+    const client = useHttps ? https : http;
+    
+    const options: http.RequestOptions | https.RequestOptions = {
+      hostname: url.hostname,
+      port: url.port || (useHttps ? 443 : 80),
+      path: url.pathname + url.search,
+      method: method || 'GET',
+      headers: headers,
+      // Simple SSL options - just ignore cert validation
+      ...(useHttps ? { 
+        rejectUnauthorized: false
+      } : {})
+    };
+
+    const proxyReq = client.request(options, (proxyRes) => {
+      resolve({ res: proxyRes });
+    });
+
+    proxyReq.on('error', (error) => {
+      resolve({ res: null as any, error });
+    });
+
+    // Write request body if present
+    if (body.length > 0 && method !== 'GET' && method !== 'HEAD') {
+      proxyReq.write(body);
+    }
+    
+    proxyReq.end();
+  });
+}
+
 async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, targetUrl: string) {
   const url = new URL(req.url || '/', targetUrl);
   
@@ -113,86 +153,68 @@ async function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse,
     }
   }
   
-  // Use the appropriate module based on protocol
-  const client = url.protocol === 'https:' ? https : http;
+  // Try with the specified protocol first
+  let useHttps = url.protocol === 'https:';
+  let result = await makeProxyRequest(url, req.method || 'GET', headers, body, useHttps);
   
-  const options: http.RequestOptions | https.RequestOptions = {
-    hostname: url.hostname,
-    port: url.port || (url.protocol === 'https:' ? 443 : 80),
-    path: url.pathname + url.search,
-    method: req.method || 'GET',
-    headers: headers,
-    // Allow self-signed certificates for HTTPS
-    ...(url.protocol === 'https:' ? { rejectUnauthorized: false } : {})
-  };
-
-  return new Promise<void>((resolve) => {
-    // Make the proxy request
-    const proxyReq = client.request(options, (proxyRes) => {
-      // Add CORS headers
-      addCorsHeaders(res, req.headers.origin);
-      
-      // Copy response headers (except CORS ones)
-      Object.entries(proxyRes.headers).forEach(([key, value]) => {
-        if (!key.toLowerCase().startsWith('access-control-') && value) {
-          res.setHeader(key, value);
+  // If we get EPROTO error, it might be wrong protocol - try the opposite
+  if (result.error && (result.error as any).code === 'EPROTO') {
+    console.log(`⚠️  Protocol mismatch detected, retrying with ${useHttps ? 'HTTP' : 'HTTPS'}...`);
+    useHttps = !useHttps;
+    result = await makeProxyRequest(url, req.method || 'GET', headers, body, useHttps);
+  }
+  
+  if (result.error) {
+    const errorDetails = result.error instanceof Error 
+      ? { 
+          message: result.error.message, 
+          code: (result.error as any).code,
+          cause: (result.error as any).cause
         }
-      });
-      
-      // Set status code
-      res.writeHead(proxyRes.statusCode || 200, proxyRes.statusMessage);
-      
-      // Pipe the response
-      proxyRes.pipe(res);
-      
-      proxyRes.on('end', () => {
-        resolve();
-      });
-    });
-
-    // Handle errors
-    proxyReq.on('error', (error) => {
-      const errorDetails = error instanceof Error 
-        ? { 
-            message: error.message, 
-            code: (error as any).code,
-            cause: (error as any).cause
-          }
-        : { message: 'Unknown error' };
-      
-      console.error('❌ Proxy error:', {
-        url: req.url,
-        method: req.method,
-        target: targetUrl,
-        error: errorDetails
-      });
-      
-      // Make sure we haven't already sent headers
-      if (!res.headersSent) {
-        addCorsHeaders(res, req.headers.origin);
-        res.writeHead(502, 'Bad Gateway', { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-          error: 'Proxy request failed',
-          message: errorDetails.message,
-          details: {
-            target: targetUrl,
-            method: req.method,
-            path: req.url,
-            code: errorDetails.code
-          }
-        }));
-      }
-      
-      resolve();
-    });
-
-    // Write request body if present
-    if (body.length > 0 && req.method !== 'GET' && req.method !== 'HEAD') {
-      proxyReq.write(body);
-    }
+      : { message: 'Unknown error' };
     
-    proxyReq.end();
+    console.error('❌ Proxy error:', {
+      url: req.url,
+      method: req.method,
+      target: targetUrl,
+      error: errorDetails
+    });
+    
+    if (!res.headersSent) {
+      addCorsHeaders(res, req.headers.origin);
+      res.writeHead(502, 'Bad Gateway', { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        error: 'Proxy request failed',
+        message: errorDetails.message,
+        details: {
+          target: targetUrl,
+          method: req.method,
+          path: req.url,
+          code: errorDetails.code
+        }
+      }));
+    }
+    return;
+  }
+  
+  // Success - forward the response
+  const proxyRes = result.res;
+  
+  // Add CORS headers
+  addCorsHeaders(res, req.headers.origin);
+  
+  // Copy response headers (except CORS ones)
+  Object.entries(proxyRes.headers).forEach(([key, value]) => {
+    if (!key.toLowerCase().startsWith('access-control-') && value) {
+      res.setHeader(key, value);
+    }
   });
+  
+  // Set status code
+  res.writeHead(proxyRes.statusCode || 200, proxyRes.statusMessage);
+  
+  // Pipe the response
+  proxyRes.pipe(res);
 }
 
 function startProxy(config: Config) {
@@ -246,7 +268,7 @@ async function main() {
           hostname: testUrl.hostname,
           port: testUrl.port || (testUrl.protocol === 'https:' ? 443 : 80),
           path: '/',
-          method: 'HEAD',
+          method: 'GET',  // Changed from HEAD to GET as some servers don't support HEAD
           timeout: 3000,
           ...(testUrl.protocol === 'https:' ? { rejectUnauthorized: false } : {})
         };
